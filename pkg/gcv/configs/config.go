@@ -49,6 +49,7 @@ const (
 	K8STargetName = "admission.k8s.gatekeeper.sh"
 	GCPTargetName = "validation.gcp.forsetisecurity.org"
 	TFTargetName  = "validation.resourcechange.terraform.cloud.google.com"
+	ARMTargetName = "arm.policy.azure.com"
 )
 
 const (
@@ -59,6 +60,7 @@ const (
 )
 
 const (
+	armConstraint = "arm"
 	gcpConstraint = "gcp"
 	k8sConstraint = "k8s"
 	tfConstraint  = "terraform"
@@ -313,6 +315,8 @@ func convertLegacyConstraint(u *unstructured.Unstructured) error {
 
 // Configuration represents the configuration files fed into FCV.
 type Configuration struct {
+	ARMTemplates   []*cftemplates.ConstraintTemplate // Constraint Templates for ARM
+	ARMConstraints []*unstructured.Unstructured      // Constraints for ARM
 	GCPTemplates   []*cftemplates.ConstraintTemplate // Constraint Templates for GCP
 	GCPConstraints []*unstructured.Unstructured      // Constraints for GCP
 	K8STemplates   []*cftemplates.ConstraintTemplate // Constraint Templates for GKE
@@ -424,6 +428,8 @@ func (c *Configuration) loadUnstructured(u *unstructured.Unstructured) error {
 		for _, target := range ct.Spec.Targets {
 			switch target.Target {
 
+			case ARMTargetName:
+				c.ARMTemplates = append(c.ARMTemplates, &ct)
 			case GCPTargetName:
 				c.GCPTemplates = append(c.GCPTemplates, &ct)
 			case TFTargetName:
@@ -446,6 +452,9 @@ func (c *Configuration) loadUnstructured(u *unstructured.Unstructured) error {
 
 func (c *Configuration) finishLoad() error {
 	templates := map[string]string{}
+	for _, t := range c.ARMTemplates {
+		templates[t.Spec.CRD.Spec.Names.Kind] = armConstraint
+	}
 	for _, t := range c.GCPTemplates {
 		templates[t.Spec.CRD.Spec.Names.Kind] = gcpConstraint
 	}
@@ -479,6 +488,8 @@ func (c *Configuration) finishLoad() error {
 		}
 
 		switch templates[gvk.Kind] {
+		case armConstraint:
+			c.ARMConstraints = append(c.ARMConstraints, constraint)
 		case gcpConstraint:
 			c.GCPConstraints = append(c.GCPConstraints, constraint)
 		case tfConstraint:

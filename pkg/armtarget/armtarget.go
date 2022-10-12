@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package tftarget is a constraint framework target for config-validator to use for integrating with the opa constraint framework.
-package tftarget
+package armtarget
 
 import (
 	"fmt"
@@ -29,21 +29,21 @@ import (
 )
 
 // Name is the target name for TFTarget
-const Name = "validation.resourcechange.terraform.cloud.google.com"
+const Name = "arm.policy.azure.com"
 
 // TFTarget is the constraint framework target for config-validator
-type TFTarget struct {
+type ARMTarget struct {
 }
 
-var _ client.TargetHandler = &TFTarget{}
+var _ client.TargetHandler = &ARMTarget{}
 
 // New returns a new TFTarget
-func New() *TFTarget {
-	return &TFTarget{}
+func New() *ARMTarget {
+	return &ARMTarget{}
 }
 
 // MatchSchema implements client.MatchSchemaProvider
-func (g *TFTarget) MatchSchema() apiextensions.JSONSchemaProps {
+func (g *ARMTarget) MatchSchema() apiextensions.JSONSchemaProps {
 	schema := apiextensions.JSONSchemaProps{
 		Type: "object",
 		Properties: map[string]apiextensions.JSONSchemaProps{
@@ -65,33 +65,33 @@ func (g *TFTarget) MatchSchema() apiextensions.JSONSchemaProps {
 			},
 		},
 	}
-	fmt.Println("==========TF SCHEMA==========")
+	fmt.Println("==========ARM SCHEMA==========")
 	fmt.Println(schema)
-	fmt.Println("==========END TF SCHEMA==========")
+	fmt.Println("==========END ARM SCHEMA==========")
 	return schema
 }
 
 // GetName implements client.TargetHandler
-func (g *TFTarget) GetName() string {
-	fmt.Println("==========TF GetName==========")
+func (g *ARMTarget) GetName() string {
+	fmt.Println("==========ARM GetName==========")
 	return Name
 }
 
 // Library implements client.TargetHandler
-func (g *TFTarget) Library() *template.Template {
-	fmt.Println("==========TF Library==========")
+func (g *ARMTarget) Library() *template.Template {
+	fmt.Println("==========ARM Library==========")
 	return libraryTemplate
 }
 
 // ProcessData implements client.TargetHandler
-func (g *TFTarget) ProcessData(obj interface{}) (bool, string, interface{}, error) {
-	fmt.Println("==========TF ProcessData==========")
+func (g *ARMTarget) ProcessData(obj interface{}) (bool, string, interface{}, error) {
+	fmt.Println("==========ARM ProcessData==========")
 	return false, "", nil, errors.Errorf("Storing data for referential constraint eval is not supported at this time.")
 }
 
 // HandleReview implements client.TargetHandler
-func (g *TFTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
-	fmt.Println("==========TF HandleReview==========")
+func (g *ARMTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
+	fmt.Println("==========ARM HandleReview==========")
 	switch resource := obj.(type) {
 	case map[string]interface{}:
 		if _, found, err := unstructured.NestedString(resource, "name"); !found || err != nil {
@@ -113,8 +113,8 @@ func (g *TFTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
 }
 
 // HandleViolation implements client.TargetHandler
-func (g *TFTarget) HandleViolation(result *types.Result) error {
-	fmt.Println("==========TF HandleViolation==========")
+func (g *ARMTarget) HandleViolation(result *types.Result) error {
+	fmt.Println("==========ARM HandleViolation==========")
 	result.Resource = result.Review
 	fmt.Println(result)
 	fmt.Println(result.Review)
@@ -150,8 +150,8 @@ func checkPathGlobs(rs []string) error {
 }
 
 // ValidateConstraint implements client.TargetHandler
-func (g *TFTarget) ValidateConstraint(constraint *unstructured.Unstructured) error {
-	fmt.Println("==========TF ValidateConstraint==========")
+func (g *ARMTarget) ValidateConstraint(constraint *unstructured.Unstructured) error {
+	fmt.Println("==========ARM ValidateConstraint==========")
 	fmt.Println(constraint.Object)
 	includes, found, err := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "addresses")
 	fmt.Println("INCLUDES")

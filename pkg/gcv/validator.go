@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/config-validator/pkg/gcv/configs"
 	"github.com/GoogleCloudPlatform/config-validator/pkg/multierror"
 	"github.com/GoogleCloudPlatform/config-validator/pkg/tftarget"
+	"github.com/GoogleCloudPlatform/config-validator/pkg/armtarget"
 	"github.com/golang/glog"
 	cfclient "github.com/open-policy-agent/frameworks/constraint/pkg/client"
 	"github.com/open-policy-agent/frameworks/constraint/pkg/client/drivers/local"
@@ -69,6 +70,7 @@ type Validator struct {
 	gcpCFClient      *cfclient.Client
 	k8sCFClient      *cfclient.Client
 	tfCFClient       *cfclient.Client
+	armCFClient		 *cfclient.Client
 }
 
 // Stores functional options for CF client
@@ -107,6 +109,13 @@ func newCFClient(
 	opts ...Option) (
 	*cfclient.Client, error) {
 
+	fmt.Println("========== TEMPLATES ==========")
+	fmt.Println()
+	for _, template := range templates {
+		fmt.Println("========== TEMPLATE ==========")
+		fmt.Println(template)
+	}
+
 	options := &initOptions{
 		driverArgs: []local.Arg{local.Tracing(false)},
 		clientArgs: []cfclient.Opt{cfclient.Targets(targetHandler)},
@@ -120,10 +129,15 @@ func newCFClient(
 	// Append driver option after creation
 	options.backendArgs = append(options.backendArgs, cfclient.Driver(driver))
 	backend, err := cfclient.NewBackend(options.backendArgs...)
+
+	fmt.Printf("Type of %v is %T", backend, backend)
+	fmt.Println()
 	if err != nil {
 		return nil, fmt.Errorf("unable to set up Constraint Framework backend: %w", err)
 	}
 	cfClient, err := backend.NewClient(options.clientArgs...)
+	fmt.Printf("Type of %v is %T", cfClient, cfClient)
+	fmt.Println()
 	if err != nil {
 		return nil, fmt.Errorf("unable to set up Constraint Framework client: %w", err)
 	}
@@ -147,6 +161,9 @@ func newCFClient(
 	if !errs.Empty() {
 		return nil, errs.ToError()
 	}
+	fmt.Println("========== CFCLIENT ==========")
+	fmt.Println(cfClient)
+
 	return cfClient, nil
 }
 
@@ -167,10 +184,16 @@ func NewValidatorFromConfig(config *configs.Configuration, opts ...Option) (*Val
 		return nil, fmt.Errorf("unable to set up TF Constraint Framework client: %w", err)
 	}
 
+	armCFClient, err := newCFClient(armtarget.New(), config.ARMTemplates, config.ARMConstraints, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("unable to set up ARM Constraint Framework client: %w", err)
+	}
+
 	ret := &Validator{
 		gcpCFClient: gcpCFClient,
 		k8sCFClient: k8sCFClient,
 		tfCFClient:  tfCFClient,
+		armCFClient: armCFClient,
 	}
 	return ret, nil
 }

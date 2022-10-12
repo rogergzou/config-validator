@@ -50,7 +50,7 @@ func New() *GCPTarget {
 
 // MatchSchema implements client.MatchSchemaProvider
 func (g *GCPTarget) MatchSchema() apiextensions.JSONSchemaProps {
-	return apiextensions.JSONSchemaProps{
+	schema := apiextensions.JSONSchemaProps{
 		Type: "object",
 		Properties: map[string]apiextensions.JSONSchemaProps{
 			"target": {
@@ -87,25 +87,34 @@ func (g *GCPTarget) MatchSchema() apiextensions.JSONSchemaProps {
 			},
 		},
 	}
+
+	fmt.Println("==========GCP SCHEMA==========")
+	fmt.Println(schema)
+	fmt.Println("==========END GCP SCHEMA==========")
+	return schema
 }
 
 // GetName implements client.TargetHandler
 func (g *GCPTarget) GetName() string {
+	fmt.Println("==========GCP GetName==========")
 	return Name
 }
 
 // Library implements client.TargetHandler
 func (g *GCPTarget) Library() *template.Template {
+	fmt.Println("==========GCP Library==========")
 	return libraryTemplate
 }
 
 // ProcessData implements client.TargetHandler
 func (g *GCPTarget) ProcessData(obj interface{}) (bool, string, interface{}, error) {
+	fmt.Println("==========GCP ProcessData==========")
 	return false, "", nil, errors.New("Storing data for referential constraint eval is not supported at this time.")
 }
 
 // HandleReview implements client.TargetHandler
 func (g *GCPTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
+	fmt.Println("==========GCP HandleReview==========")
 	switch asset := obj.(type) {
 	case *validator.Asset:
 		return g.handleAsset(asset)
@@ -197,6 +206,7 @@ func (g *GCPTarget) handleAsset(asset *validator.Asset) (bool, interface{}, erro
 
 // HandleViolation implements client.TargetHandler
 func (g *GCPTarget) HandleViolation(result *types.Result) error {
+	fmt.Println("==========GCP HandleViolation==========")
 	result.Resource = result.Review
 	return nil
 }
@@ -278,6 +288,7 @@ func checkPathGlobs(rs []string) error {
 
 // ValidateConstraint implements client.TargetHandler
 func (g *GCPTarget) ValidateConstraint(constraint *unstructured.Unstructured) error {
+	fmt.Println("==========GCP ValidateConstraint==========")
 	ancestries, ancestriesFound, ancestriesErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "ancestries")
 	targets, targetsFound, targetsErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "target")
 	if ancestriesFound && targetsFound {

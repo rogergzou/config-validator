@@ -54,6 +54,9 @@ const testConstraintKind = "TestConstraint"
 func newConstraintTemplate(targetName, rego string) *templates.ConstraintTemplate {
 	// Building a correct constraint template is difficult based on the struct. It's easier
 	// to reason about yaml files and rely on existing conversion code.
+	fmt.Println("========== newConstraintTemplate ==========")
+	fmt.Println(targetName)
+	fmt.Println(rego)
 	ctSpec := map[string]interface{}{
 		"crd": map[string]interface{}{
 			"spec": map[string]interface{}{
@@ -88,6 +91,7 @@ func newConstraintTemplate(targetName, rego string) *templates.ConstraintTemplat
 	}
 
 	var templates []*templates.ConstraintTemplate
+	templates = append(templates, config.ARMTemplates...)
 	templates = append(templates, config.GCPTemplates...)
 	templates = append(templates, config.K8STemplates...)
 	templates = append(templates, config.TFTemplates...)
@@ -146,6 +150,9 @@ func (tt *TargetHandlerTest) Test(t *testing.T) {
 	t.Run("matching_constraints", func(t *testing.T) {
 		for _, tc := range tt.ReviewTestcases {
 			tc.testcaseBase = testBase
+			fmt.Print("==========TESTING: ")
+			fmt.Print(tc.Name)
+			fmt.Println("==========")
 			t.Run(tc.Name, tc.run)
 		}
 	})
