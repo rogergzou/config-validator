@@ -23,5 +23,5 @@ make clear     delete binaries
 make format    reformat code
 ```
 
-## Disclaimer
-This is not an officially supported Google product.
+## Roger Notes
+If you have trouble installing `make` with `choco`, it may be a source issue. Try `choco install make --source="'.;https://chocolatey.org/api/v2'"`
