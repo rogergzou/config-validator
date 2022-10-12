@@ -27,3 +27,5 @@ make format    reformat code
 If you have trouble installing `make` with `choco`, it may be a source issue. Try `choco install make --source="'.;https://chocolatey.org/api/v2'"`
 
 If you get a docker error during `make proto` aka `error during connect: In the default daemon configuration on Windows, the docker client must be run with elevated privileges to connect.`, then install Docker Desktop, and then from the start menu, right click on it, and run as Administrator. This will start the docker daemon as admin.
+
+Or, per Han, can install Linux and run wsl. microsoft.com/store/productId/9MSVKQC78PK6
