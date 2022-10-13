@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package tftarget is a constraint framework target for config-validator to use for integrating with the opa constraint framework.
+// Package armtarget is a constraint framework target for config-validator to use for integrating with the opa constraint framework.
 package armtarget
 
 import (
@@ -28,16 +28,16 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// Name is the target name for TFTarget
+// Name is the target name for ARMTarget
 const Name = "arm.policy.azure.com"
 
-// TFTarget is the constraint framework target for config-validator
+// ARMTarget is the constraint framework target for config-validator
 type ARMTarget struct {
 }
 
 var _ client.TargetHandler = &ARMTarget{}
 
-// New returns a new TFTarget
+// New returns a new ARMTarget
 func New() *ARMTarget {
 	return &ARMTarget{}
 }
