@@ -43,7 +43,8 @@ const defaultConstraintTemplateRego = `
 package testconstraint
 
 violation[{"msg": msg}] {
-	input.parameters.fail == true
+	input.parameters.kind == "VirtualMachine" 
+    input.parameters.type == "Microsoft.Compute/virtualMachines"
 	msg := input.parameters.msg
 }
 `
@@ -206,7 +207,8 @@ func (tc *ReviewTestcase) run(t *testing.T) {
 	// Create synthetic constraint
 	constraintSpec := map[string]interface{}{
 		"parameters": map[string]interface{}{
-			"fail": true,
+			"kind": "VirtualMachine",
+			"type": "Microsoft.Compute/virtualMachines",
 			"msg":  "it matched",
 		},
 	}

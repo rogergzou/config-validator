@@ -362,8 +362,11 @@ func LoadRegoFiles(dir string) ([]string, error) {
 }
 
 func (c *Configuration) loadUnstructured(u *unstructured.Unstructured) error {
+	fmt.Println(u.GroupVersionKind())
+
 	switch u.GroupVersionKind().Group {
 	case constraintGroup:
+		fmt.Println("CONSTRAINT GROUP")
 		if u.GroupVersionKind().Version == "v1alpha1" {
 			glog.Warning(
 				"v1alpha1 constraints are deprecated and will be removed in a future release. " +
@@ -373,6 +376,7 @@ func (c *Configuration) loadUnstructured(u *unstructured.Unstructured) error {
 		c.allConstraints = append(c.allConstraints, u)
 
 	case templateGroup:
+		fmt.Println("TEMPLATE GROUP")
 		if u.GroupVersionKind().Kind != "ConstraintTemplate" {
 			return errors.Errorf("unexpected data type %s in group %s", u.GroupVersionKind(), templateGroup)
 		}
@@ -393,6 +397,7 @@ func (c *Configuration) loadUnstructured(u *unstructured.Unstructured) error {
 					"to ConstraintFramework format, this is likely due to an issue in the spec.crd.spec.validation field")
 			}
 		case "v1beta1":
+			fmt.Println("BETA VERSION")
 			openAPIResult := configValidatorV1Beta1SchemaValidator.Validate(u.Object)
 			if openAPIResult.HasErrorsOrWarnings() {
 				return errors.Wrapf(openAPIResult.AsError(), "v1alpha1 validation failure")
@@ -524,15 +529,18 @@ func NewConfiguration(dirs []string, libDir string) (*Configuration, error) {
 func NewConfigurationFromContents(unstructuredObjects []*unstructured.Unstructured, regoLib []string) (*Configuration, error) {
 	configuration := newConfiguration()
 	configuration.regoLib = regoLib
+	fmt.Println("TESTING CONFIGURATION")
 	var errs multierror.Errors
 	for _, u := range unstructuredObjects {
 		if err := configuration.loadUnstructured(u); err != nil {
+			fmt.Println(err)
 			yamlPath := u.GetAnnotations()[yamlPath]
 			name := u.GetName()
 			errs.Add(errors.Wrapf(err, "failed to load resource %s %s", yamlPath, name))
 		}
 	}
 	if !errs.Empty() {
+		fmt.Println("RETURNING ERRORS")
 		return nil, errs.ToError()
 
 	}
