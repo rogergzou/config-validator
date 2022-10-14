@@ -16,14 +16,20 @@
 package armtarget
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"text/template"
 
+	"github.com/GoogleCloudPlatform/config-validator/pkg/api/validator"
+	asset2 "github.com/GoogleCloudPlatform/config-validator/pkg/asset"
+	"github.com/gogo/protobuf/jsonpb"
 	"github.com/open-policy-agent/frameworks/constraint/pkg/client"
 	"github.com/open-policy-agent/frameworks/constraint/pkg/types"
-	"github.com/pkg/errors"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -31,7 +37,7 @@ import (
 // Name is the target name for ARMTarget
 const Name = "arm.policy.azure.com"
 
-// ARMTarget is the constraint framework target for config-validator
+// ARMTarget is the constraint framework target for CAI asset data
 type ARMTarget struct {
 }
 
@@ -47,7 +53,7 @@ func (g *ARMTarget) MatchSchema() apiextensions.JSONSchemaProps {
 	schema := apiextensions.JSONSchemaProps{
 		Type: "object",
 		Properties: map[string]apiextensions.JSONSchemaProps{
-			"addresses": {
+			"target": {
 				Type: "array",
 				Items: &apiextensions.JSONSchemaPropsOrArray{
 					Schema: &apiextensions.JSONSchemaProps{
@@ -55,7 +61,23 @@ func (g *ARMTarget) MatchSchema() apiextensions.JSONSchemaProps {
 					},
 				},
 			},
-			"excludedAddresses": {
+			"exclude": {
+				Type: "array",
+				Items: &apiextensions.JSONSchemaPropsOrArray{
+					Schema: &apiextensions.JSONSchemaProps{
+						Type: "string",
+					},
+				},
+			},
+			"ancestries": {
+				Type: "array",
+				Items: &apiextensions.JSONSchemaPropsOrArray{
+					Schema: &apiextensions.JSONSchemaProps{
+						Type: "string",
+					},
+				},
+			},
+			"excludedAncestries": {
 				Type: "array",
 				Items: &apiextensions.JSONSchemaPropsOrArray{
 					Schema: &apiextensions.JSONSchemaProps{
@@ -65,6 +87,7 @@ func (g *ARMTarget) MatchSchema() apiextensions.JSONSchemaProps {
 			},
 		},
 	}
+
 	fmt.Println("==========ARM SCHEMA==========")
 	fmt.Println(schema)
 	fmt.Println("==========END ARM SCHEMA==========")
@@ -86,55 +109,169 @@ func (g *ARMTarget) Library() *template.Template {
 // ProcessData implements client.TargetHandler
 func (g *ARMTarget) ProcessData(obj interface{}) (bool, string, interface{}, error) {
 	fmt.Println("==========ARM ProcessData==========")
-	return false, "", nil, errors.Errorf("Storing data for referential constraint eval is not supported at this time.")
+	return false, "", nil, errors.New("Storing data for referential constraint eval is not supported at this time.")
 }
 
 // HandleReview implements client.TargetHandler
 func (g *ARMTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
 	fmt.Println("==========ARM HandleReview==========")
-	switch resource := obj.(type) {
+	switch asset := obj.(type) {
+	case *validator.Asset:
+		return g.handleAsset(asset)
 	case map[string]interface{}:
-		if _, found, err := unstructured.NestedString(resource, "name"); !found || err != nil {
+		if _, found, err := unstructured.NestedString(asset, "name"); !found || err != nil {
 			return false, nil, err
 		}
-		if _, found, err := unstructured.NestedString(resource, "address"); !found || err != nil {
+		if _, found, err := unstructured.NestedString(asset, "asset_type"); !found || err != nil {
 			return false, nil, err
 		}
-		if _, found, err := unstructured.NestedMap(resource, "change"); !found || err != nil {
+		if _, found, err := unstructured.NestedString(asset, "ancestry_path"); !found || err != nil {
 			return false, nil, err
 		}
-		if _, found, err := unstructured.NestedString(resource, "type"); !found || err != nil {
+		_, foundResource, err := unstructured.NestedMap(asset, "resource")
+		if err != nil {
 			return false, nil, err
 		}
-		fmt.Println(resource)
-		return true, resource, nil
+		_, foundIam, err := unstructured.NestedMap(asset, "iam_policy")
+		if err != nil {
+			return false, nil, err
+		}
+		foundOrgPolicy := false
+		if asset["org_policy"] != nil {
+			foundOrgPolicy = true
+		}
+		_, foundAccessPolicy, err := unstructured.NestedMap(asset, "access_policy")
+		if err != nil {
+			return false, nil, err
+		}
+		_, foundAcessLevel, err := unstructured.NestedMap(asset, "access_level")
+		if err != nil {
+			return false, nil, err
+		}
+		_, foundServicePerimeter, err := unstructured.NestedMap(asset, "service_perimeter")
+		if err != nil {
+			return false, nil, err
+		}
+
+		if !foundIam && !foundResource && !foundOrgPolicy && !foundAccessPolicy && !foundAcessLevel && !foundServicePerimeter {
+			return false, nil, nil
+		}
+		resourceTypes := 0
+		if foundResource {
+			resourceTypes++
+		}
+		if foundIam {
+			resourceTypes++
+		}
+		if foundOrgPolicy {
+			resourceTypes++
+		}
+		if foundAccessPolicy {
+			resourceTypes++
+		}
+		if foundAcessLevel {
+			resourceTypes++
+		}
+		if foundServicePerimeter {
+			resourceTypes++
+		}
+		if resourceTypes > 1 {
+			return false, nil, fmt.Errorf("malformed asset has more than one of: resource, iam policy, org policy, access context policy: %v", asset)
+		}
+		return true, asset, nil
 	}
 	return false, nil, nil
+}
+
+// handleAsset handles input from CAI assets as received via the gRPC interface.
+func (g *ARMTarget) handleAsset(asset *validator.Asset) (bool, interface{}, error) {
+	if asset.Resource == nil {
+		return false, nil, fmt.Errorf("CAI asset's resource field is nil %s", asset)
+	}
+	asset2.CleanStructValue(asset.Resource.Data)
+	m := &jsonpb.Marshaler{
+		OrigName: true,
+	}
+	var buf bytes.Buffer
+	if err := m.Marshal(&buf, asset); err != nil {
+		return false, nil, fmt.Errorf("marshalling to json with asset %s: %v. %w", asset.Name, asset, err)
+	}
+	var f interface{}
+	err := json.Unmarshal(buf.Bytes(), &f)
+	if err != nil {
+		return false, nil, fmt.Errorf("marshalling from json with asset %s: %v. %w", asset.Name, asset, err)
+	}
+	return true, f, nil
 }
 
 // HandleViolation implements client.TargetHandler
 func (g *ARMTarget) HandleViolation(result *types.Result) error {
 	fmt.Println("==========ARM HandleViolation==========")
 	result.Resource = result.Review
-	fmt.Println(result)
-	fmt.Println(result.Review)
 	return nil
 }
 
-var partRegex = regexp.MustCompile(`[\w.\-_\[\]\d]+`)
+/*
+cases
+organizations/*
+organizations/[0-9]+/*
+organizations/[0-9]+/folders/*
+organizations/[0-9]+/folders/[0-9]+/*
+organizations/[0-9]+/folders/[0-9]+/projects/*
+organizations/[0-9]+/folders/[0-9]+/projects/[0-9]+
+folders/*
+folders/[0-9]+/*
+folders/[0-9]+/projects/*
+folders/[0-9]+/projects/[0-9]+
+projects/*
+projects/[0-9]+
+*/
+
+const (
+	organization = "organizations"
+	folder       = "folders"
+	project      = "projects"
+)
+
+const (
+	stateStart   = "stateStart"
+	stateFolder  = "stateFolder"
+	stateProject = "stateProject"
+)
+
+var numberRegex = regexp.MustCompile(`^[0-9]+\*{0,2}$`)
+
+// From https://cloud.google.com/resource-manager/docs/creating-managing-projects:
+// The project ID must be a unique string of 6 to 30 lowercase letters, digits, or hyphens. It must start with a letter, and cannot have a trailing hyphen.
+var projectIDRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{5,27}[a-z0-9]$`)
 
 // checkPathGlob
 func checkPathGlob(expression string) error {
 	// check for path components / numbers
-	parts := strings.Split(expression, ".")
+	parts := strings.Split(expression, "/")
+	state := stateStart
 	for i := 0; i < len(parts); i++ {
 		item := parts[i]
 		switch {
+		case item == organization:
+			if state != stateStart {
+				return fmt.Errorf("unexpected %s element %d in %s", item, i, expression)
+			}
+			state = stateFolder
+		case item == folder:
+			if state != stateStart && state != stateFolder {
+				return fmt.Errorf("unexpected %s element %d in %s", item, i, expression)
+			}
+			state = stateFolder
+		case item == project:
+			state = stateProject
 		case item == "*":
 		case item == "**":
-		case partRegex.MatchString(item):
+		case item == "unknown":
+		case numberRegex.MatchString(item):
+		case state == stateProject && projectIDRegex.MatchString(item):
 		default:
-			return errors.Errorf("unexpected item %s element %d in %s", item, i, expression)
+			return fmt.Errorf("unexpected item %s element %d in %s", item, i, expression)
 		}
 	}
 	return nil
@@ -143,7 +280,7 @@ func checkPathGlob(expression string) error {
 func checkPathGlobs(rs []string) error {
 	for idx, r := range rs {
 		if err := checkPathGlob(r); err != nil {
-			return errors.Wrapf(err, "idx: %d", idx)
+			return fmt.Errorf("idx [%d]: %w", idx, err)
 		}
 	}
 	return nil
@@ -152,29 +289,51 @@ func checkPathGlobs(rs []string) error {
 // ValidateConstraint implements client.TargetHandler
 func (g *ARMTarget) ValidateConstraint(constraint *unstructured.Unstructured) error {
 	fmt.Println("==========ARM ValidateConstraint==========")
-	fmt.Println(constraint.Object)
-	includes, found, err := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "addresses")
-	fmt.Println("INCLUDES")
-	fmt.Println(includes)
-	fmt.Println("FOUND")
-	fmt.Println(found)
-	fmt.Println("ERR")
-	fmt.Println(err)
-	if err != nil {
-		return errors.Errorf("invalid spec.match.addresses: %s", err)
-	}
-	if found {
-		if err := checkPathGlobs(includes); err != nil {
-			return errors.Wrapf(err, "invalid glob in target")
+	ancestries, ancestriesFound, ancestriesErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "ancestries")
+	targets, targetsFound, targetsErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "target")
+	if ancestriesFound && targetsFound {
+		return errors.New("only one of spec.match.ancestries and spec.match.target can be specified")
+	} else if ancestriesFound {
+		if ancestriesErr != nil {
+			return fmt.Errorf("invalid spec.match.ancestries: %s", ancestriesErr)
+		}
+		if ancestriesErr := checkPathGlobs(ancestries); ancestriesErr != nil {
+			return fmt.Errorf("invalid glob in spec.match.ancestries: %w", ancestriesErr)
+		}
+	} else if targetsFound {
+		// TODO b/232980918: replace with zapLogger.Warn
+		log.Print(
+			"spec.match.target is deprecated and will be removed in a future release. Use spec.match.ancestries instead",
+		)
+		if targetsErr != nil {
+			return fmt.Errorf("invalid spec.match.target: %s", targetsErr)
+		}
+		if targetsErr := checkPathGlobs(targets); targetsErr != nil {
+			return fmt.Errorf("invalid glob in spec.match.target: %w", targetsErr)
 		}
 	}
-	excludes, found, err := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "excludedAddresses")
-	if err != nil {
-		return errors.Errorf("invalid spec.match.excludedAddresses: %s", err)
-	}
-	if found {
-		if err := checkPathGlobs(excludes); err != nil {
-			return errors.Wrapf(err, "invalid glob in exclude")
+
+	excludedAncestries, excludedAncestriesFound, excludedAncestriesErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "excludedAncestries")
+	excludes, excludesFound, excludesErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "exclude")
+	if excludedAncestriesFound && excludesFound {
+		return errors.New("only one of spec.match.excludedAncestries and spec.match.exclude can be specified")
+	} else if excludedAncestriesFound {
+		if excludedAncestriesErr != nil {
+			return fmt.Errorf("invalid spec.match.excludedAncestries: %s", excludedAncestriesErr)
+		}
+		if excludedAncestriesErr := checkPathGlobs(excludedAncestries); excludedAncestriesErr != nil {
+			return fmt.Errorf("invalid glob in spec.match.excludedAncestries: %w", excludedAncestriesErr)
+		}
+	} else if excludesFound {
+		// TODO b/232980918: replace with zapLogger.Warn
+		log.Print(
+			"spec.match.exclude is deprecated and will be removed in a future release. Use spec.match.excludedAncestries instead",
+		)
+		if excludesErr != nil {
+			return fmt.Errorf("invalid spec.match.exclude: %s", excludesErr)
+		}
+		if excludesErr := checkPathGlobs(excludes); excludesErr != nil {
+			return fmt.Errorf("invalid glob in spec.match.exclude: %w", excludesErr)
 		}
 	}
 	return nil

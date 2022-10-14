@@ -24,23 +24,21 @@ it calls out the line number.
 const libraryTemplateSrc = `package target
 
 matching_constraints[constraint] {
-	resource := input.review
+	asset := input.review
 	constraint := {{.ConstraintsRoot}}[_][_]
 	spec := object.get(constraint, "spec", {})
 	match := object.get(spec, "match", {})
 
-	check_address(resource, match)
-}
-
-check_address(resource, match) {
+	# Try ancestries / excludedAncestries first, then
+	# fall back to target / exclude.
 	# Default matcher behavior is to match everything.
-	include := object.get(match, "addresses", ["**"])
-	include_match := {resource.address | path_matches(resource.address, include[_])}
-	count(include_match) != 0
+	ancestries := object.get(match, "ancestries", object.get(match, "target", ["**"]))
+	ancestries_match := {asset.ancestry_path | path_matches(asset.ancestry_path, ancestries[_])}
+	count(ancestries_match) != 0
 
-	exclude := object.get(match, "excludedAddresses", [])
-	exclusion_match := {resource.address | path_matches(resource.address, exclude[_])}
-	count(exclusion_match) == 0
+	excluded_ancestries := object.get(match, "excludedAncestries", object.get(match, "exclude", []))
+	excluded_ancestries_match := {asset.ancestry_path | path_matches(asset.ancestry_path, excluded_ancestries[_])}
+	count(excluded_ancestries_match) == 0
 }
 
 # CAI Resource Types
@@ -56,13 +54,43 @@ matching_reviews_and_constraints[[review, constraint]] {
 autoreject_review[rejection] {
 	false
 	rejection := {
-		"msg": "should not reach this",
+		"msg": "should not reach this", 
 	}
 }
 
 # Match path and pattern
 path_matches(path, pattern) {
-	glob.match(pattern, ["."], path)
+	glob.match(pattern, ["/"], path)
+}
+
+########
+# Util #
+########
+# get_default returns the value of an object's field or the provided default value.
+# It avoids creating an undefined state when trying to access an object attribute that does
+# not exist
+get_default(object, field, _default) = output {
+  has_field(object, field)
+  output = object[field]
+}
+
+get_default(object, field, _default) = output {
+  has_field(object, field) == false
+  output = _default
+}
+
+# has_field returns whether an object has a field
+has_field(object, field) = true {
+  object[field]
+}
+# False is a tricky special case, as false responses would create an undefined document unless
+# they are explicitly tested for
+has_field(object, field) = true {
+  object[field] == false
+}
+has_field(object, field) = false {
+  not object[field]
+  not object[field] == false
 }
 
 `
