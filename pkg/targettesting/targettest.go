@@ -241,6 +241,8 @@ func (tc *ReviewTestcase) run(t *testing.T) {
 
 	// create review from tc, input needs to be GCP hierarchy path
 	reviewObj := tc.Object(t)
+	fmt.Println("========== REVIEW OBJ ==========")
+	fmt.Println(reviewObj)
 	resp, err = cfClient.Review(ctx, reviewObj, client.Tracing(true))
 	if err != nil {
 		t.Fatal(err)

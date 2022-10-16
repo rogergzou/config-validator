@@ -79,7 +79,6 @@ var pathTestCases = []pathTestcase{
 			"../../../test/cf/templates/gcp_storage_logging_template.yaml",
 			"../../../test/cf/templates/k8srequiredlabels_template.yaml",
 			"../../../test/cf/templates/tf_compute_instance_machine_type.yaml",
-			"../../../test/cf/templates/azure_policy_template.yaml",
 		},
 	},
 	{
@@ -97,7 +96,6 @@ var pathTestCases = []pathTestcase{
 			"../../../test/cf/templates/gcp_storage_logging_template.yaml",
 			"../../../test/cf/templates/k8srequiredlabels_template.yaml",
 			"../../../test/cf/templates/tf_compute_instance_machine_type.yaml",
-			"../../../test/cf/templates/azure_policy_template.yaml",
 		},
 	},
 	{

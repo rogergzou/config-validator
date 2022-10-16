@@ -1,0 +1,27 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: azurepolicy
+spec:
+  crd:
+    spec:
+      names:
+        kind: AzurePolicy
+      validation:
+        # Schema for the `parameters` field
+        openAPIV3Schema:
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: arm.policy.azure.com
+      rego: |
+        package azurepolicy
+
+        violation[{"msg": msg}] {
+          input.parameters.kind == "VirtualMachine" 
+          input.parameters.type == "Microsoft.Compute/virtualMachines"
+          msg := input.parameters.msg
+        }
