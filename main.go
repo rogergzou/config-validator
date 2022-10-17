@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"text/template"
 
@@ -42,61 +41,6 @@ const defaultTargetName = "arm.policy.azure.com"
 
 const testVersion = "v1beta1"
 const testConstraintKind = "ArmPolicyConstraint"
-
-func newConstraintTemplate(targetName, rego string) *cftemplates.ConstraintTemplate {
-	// Building a correct constraint template is difficult based on the struct. It's easier
-	// to reason about yaml files and rely on existing conversion code.
-	fmt.Println("========== newConstraintTemplate ==========")
-	fmt.Println(targetName)
-	fmt.Println(rego)
-	ctSpec := map[string]interface{}{
-		"crd": map[string]interface{}{
-			"spec": map[string]interface{}{
-				"names": map[string]interface{}{
-					"kind": testConstraintKind,
-				},
-				"validation": map[string]interface{}{
-					"openAPIV3Schema": map[string]interface{}{},
-				},
-			},
-		},
-		"targets": []map[string]interface{}{
-			{
-				"target": targetName,
-				"rego":   rego,
-			},
-		},
-	}
-	ctRaw := map[string]interface{}{
-		"apiVersion": fmt.Sprintf("templates.gatekeeper.sh/%s", testVersion),
-		"kind":       "ConstraintTemplate",
-		"metadata": map[string]interface{}{
-			"name": strings.ToLower(testConstraintKind),
-		},
-		"spec": ctSpec,
-	}
-
-	fmt.Println("========== CT ==========")
-	fmt.Println(ctRaw)
-
-	groupVersioner := runtime.GroupVersioner(schema.GroupVersions(scheme.Scheme.PrioritizedVersionsAllGroups()))
-	obj, err := scheme.Scheme.ConvertToVersion(&unstructured.Unstructured{Object: ctRaw}, groupVersioner)
-	fmt.Println("======= VERSION OBJ")
-	fmt.Println(obj)
-	if err != nil {
-		panic(err)
-	}
-
-	var ct cftemplates.ConstraintTemplate
-
-	fmt.Println("======= CT OBJ")
-	fmt.Println(ct)
-	if err := scheme.Scheme.Convert(obj, &ct, nil); err != nil {
-		panic(err)
-	}
-
-	return &ct
-}
 
 // ARM LIBRARY TEMPLATE IMPLEMENTATION
 /*
@@ -153,7 +97,6 @@ func New() *ARMTarget {
 
 // MatchSchema implements client.MatchSchemaProvider
 func (g *ARMTarget) MatchSchema() apiextensions.JSONSchemaProps {
-	fmt.Println("==========ARM MatchSchema==========")
 	schema := apiextensions.JSONSchemaProps{
 		Type: "object",
 		Properties: map[string]apiextensions.JSONSchemaProps{
@@ -170,19 +113,16 @@ func (g *ARMTarget) GetName() string {
 
 // Library implements client.TargetHandler
 func (g *ARMTarget) Library() *template.Template {
-	fmt.Println("==========ARM Library==========")
 	return libraryTemplate
 }
 
 // ProcessData implements client.TargetHandler
 func (g *ARMTarget) ProcessData(obj interface{}) (bool, string, interface{}, error) {
-	fmt.Println("==========ARM ProcessData==========")
 	return false, "", nil, errors.New("Storing data for referential constraint eval is not supported at this time.")
 }
 
 // HandleReview implements client.TargetHandler
 func (g *ARMTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
-	fmt.Println("==========ARM HandleReview==========")
 	switch asset := obj.(type) {
 	case map[string]interface{}:
 		return true, asset, nil
@@ -192,95 +132,17 @@ func (g *ARMTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
 
 // HandleViolation implements client.TargetHandler
 func (g *ARMTarget) HandleViolation(result *types.Result) error {
-	fmt.Println("==========ARM HandleViolation==========")
-	fmt.Println(result)
-	fmt.Println(result.Review)
 	result.Resource = result.Review
-	return nil
-}
-
-/*
-cases
-organizations/*
-organizations/[0-9]+/*
-organizations/[0-9]+/folders/*
-organizations/[0-9]+/folders/[0-9]+/*
-organizations/[0-9]+/folders/[0-9]+/projects/*
-organizations/[0-9]+/folders/[0-9]+/projects/[0-9]+
-folders/*
-folders/[0-9]+/*
-folders/[0-9]+/projects/*
-folders/[0-9]+/projects/[0-9]+
-projects/*
-projects/[0-9]+
-*/
-
-const (
-	organization = "organizations"
-	folder       = "folders"
-	project      = "projects"
-)
-
-const (
-	stateStart   = "stateStart"
-	stateFolder  = "stateFolder"
-	stateProject = "stateProject"
-)
-
-var numberRegex = regexp.MustCompile(`^[0-9]+\*{0,2}$`)
-
-// From https://cloud.google.com/resource-manager/docs/creating-managing-projects:
-// The project ID must be a unique string of 6 to 30 lowercase letters, digits, or hyphens. It must start with a letter, and cannot have a trailing hyphen.
-var projectIDRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{5,27}[a-z0-9]$`)
-
-// checkPathGlob
-func checkPathGlob(expression string) error {
-	// check for path components / numbers
-	parts := strings.Split(expression, "/")
-	state := stateStart
-	for i := 0; i < len(parts); i++ {
-		item := parts[i]
-		switch {
-		case item == organization:
-			if state != stateStart {
-				return fmt.Errorf("unexpected %s element %d in %s", item, i, expression)
-			}
-			state = stateFolder
-		case item == folder:
-			if state != stateStart && state != stateFolder {
-				return fmt.Errorf("unexpected %s element %d in %s", item, i, expression)
-			}
-			state = stateFolder
-		case item == project:
-			state = stateProject
-		case item == "*":
-		case item == "**":
-		case item == "unknown":
-		case numberRegex.MatchString(item):
-		case state == stateProject && projectIDRegex.MatchString(item):
-		default:
-			return fmt.Errorf("unexpected item %s element %d in %s", item, i, expression)
-		}
-	}
-	return nil
-}
-
-func checkPathGlobs(rs []string) error {
-	for idx, r := range rs {
-		if err := checkPathGlob(r); err != nil {
-			return fmt.Errorf("idx [%d]: %w", idx, err)
-		}
-	}
 	return nil
 }
 
 // ValidateConstraint implements client.TargetHandler
 func (g *ARMTarget) ValidateConstraint(constraint *unstructured.Unstructured) error {
-	fmt.Println("==========ARM ValidateConstraint==========")
-	fmt.Println(constraint)
 	return nil
 }
 
+// Basic constraint template.
+// Denys if the kind and type of resouce are same in parameters and revies
 const defaultConstraintTemplateRego = `
 package constraint
 
@@ -291,33 +153,85 @@ violation[{"msg": msg, "details": input}] {
 }
 `
 
-// Empty main.go to allow for installing root package.
-func main() {
-	fmt.Println("Initializing Client")
+func newConstraintTemplate(targetName, rego string) *cftemplates.ConstraintTemplate {
+	// Building a correct constraint template is difficult based on the struct. It's easier
+	// to reason about yaml files and rely on existing conversion code.
+	ctSpec := map[string]interface{}{
+		"crd": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"names": map[string]interface{}{
+					"kind": testConstraintKind,
+				},
+				"validation": map[string]interface{}{
+					"openAPIV3Schema": map[string]interface{}{},
+				},
+			},
+		},
+		"targets": []map[string]interface{}{
+			{
+				"target": targetName,
+				"rego":   rego,
+			},
+		},
+	}
+	ctRaw := map[string]interface{}{
+		"apiVersion": fmt.Sprintf("templates.gatekeeper.sh/%s", testVersion),
+		"kind":       "ConstraintTemplate",
+		"metadata": map[string]interface{}{
+			"name": strings.ToLower(testConstraintKind),
+		},
+		"spec": ctSpec,
+	}
 
+	groupVersioner := runtime.GroupVersioner(schema.GroupVersions(scheme.Scheme.PrioritizedVersionsAllGroups()))
+	obj, err := scheme.Scheme.ConvertToVersion(&unstructured.Unstructured{Object: ctRaw}, groupVersioner)
+	if err != nil {
+		panic(err)
+	}
+
+	var ct cftemplates.ConstraintTemplate
+
+	if err := scheme.Scheme.Convert(obj, &ct, nil); err != nil {
+		panic(err)
+	}
+
+	return &ct
+}
+
+func main() {
+	// Add constraint framework schemas
 	utilruntime.Must(cfapis.AddToScheme(scheme.Scheme))
 	utilruntime.Must(apiextensions.AddToScheme(scheme.Scheme))
 	utilruntime.Must(apiextensionsv1beta1.AddToScheme(scheme.Scheme))
 
+	// Instantiate driver using constraint framework
 	driver := local.New(local.Tracing(true))
+
+	// Instantiate backend using constraint framework and driver
 	backend, err := cfclient.NewBackend(cfclient.Driver(driver))
 	if err != nil {
 		fmt.Println("Error: Could not initialize backend: ", err)
 		return
 	}
+
+	// Instantiate Constraint Framework Client with ARMTarget
 	cfClient, err := backend.NewClient(cfclient.Targets(New()))
 	if err != nil {
 		fmt.Println("Error: unable to set up OPA client: ", err)
 		return
 	}
 
+	// Get background context
 	ctx := context.Background()
 
+	// Create new constraint template
 	constraintTemplate := newConstraintTemplate(defaultTargetName, defaultConstraintTemplateRego)
 
-	resp, err := cfClient.AddTemplate(ctx, constraintTemplate)
+	// Add template to the client
+	cfClient.AddTemplate(ctx, constraintTemplate)
 
 	// Create synthetic constraint
+	// This sets the parameters used in the constraint framework
 	constraintSpec := map[string]interface{}{
 		"parameters": map[string]interface{}{
 			"kind": "VirtualMachine",
@@ -326,6 +240,7 @@ func main() {
 		},
 	}
 	
+	// Create constraint object
 	constraint := map[string]interface{}{
 		"apiVersion": "constraints.gatekeeper.sh/v1beta1",
 		"kind":       testConstraintKind,
@@ -335,31 +250,59 @@ func main() {
 		"spec": constraintSpec,
 	}
 
-	resp, err = cfClient.AddConstraint(ctx, &unstructured.Unstructured{Object: constraint})
-	fmt.Println(resp)
+	// Add constraint to the client
+	cfClient.AddConstraint(ctx, &unstructured.Unstructured{Object: constraint})
 
+	// Actual data to be passed in to the constraint framework
 	data := `
 {
 	"kind": "VirtualMachine",
 	"type": "Microsoft.Compute/virtualMachines",
 	"resource": {}
 }`
+
+	// Create review item
 	var item interface{}
 	json.Unmarshal([]byte(data), &item)
-	fmt.Println(item)
 
 	result, err := cfClient.Review(ctx, item, cfclient.Tracing(true))
 
-	fmt.Println(result)
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Trace)
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Target)
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results)
+	fmt.Println("========== RESULTS ==========")
 	if len(result.ByTarget["arm.policy.azure.com"].Results) != 0 {
-		fmt.Println("========== RESULTS ==========")
-		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0])
 		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Msg)
-		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Metadata)
-		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Constraint)
 		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].EnforcementAction)
+	} else {
+		fmt.Println("========== NO VIOLATIONS ==========")
+	}
+
+	nonVMData := `
+{
+	"kind": "NotAVirtualMachine",
+	"type": "Microsoft.Compute/notAVirtualMachines",
+	"resource": {}
+}`
+
+	// Create review item
+	var nonVMItem interface{}
+	json.Unmarshal([]byte(nonVMData), &nonVMItem)
+
+	nonVMResult, err := cfClient.Review(ctx, nonVMItem, cfclient.Tracing(true))
+	fmt.Println("========== RESULTS ==========")
+	if len(nonVMResult.ByTarget["arm.policy.azure.com"].Results) != 0 {
+		fmt.Println(nonVMResult.ByTarget["arm.policy.azure.com"].Results[0].Msg)
+		fmt.Println(nonVMResult.ByTarget["arm.policy.azure.com"].Results[0].EnforcementAction)
+	} else {
+		fmt.Println("========== NO VIOLATIONS ==========")
+	}
+
+	cfClient.RemoveConstraint(ctx, &unstructured.Unstructured{Object: constraint})
+
+	newResult, err := cfClient.Review(ctx, item, cfclient.Tracing(true))
+	fmt.Println("========== RESULTS ==========")
+	if len(newResult.ByTarget["arm.policy.azure.com"].Results) != 0 {
+		fmt.Println(newResult.ByTarget["arm.policy.azure.com"].Results[0].Msg)
+		fmt.Println(newResult.ByTarget["arm.policy.azure.com"].Results[0].EnforcementAction)
+	} else {
+		fmt.Println("========== NO VIOLATIONS ==========")
 	}
 }
