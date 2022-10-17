@@ -279,8 +279,6 @@ func (g *ARMTarget) ProcessData(obj interface{}) (bool, string, interface{}, err
 func (g *ARMTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
 	fmt.Println("==========ARM HandleReview==========")
 	switch asset := obj.(type) {
-	case *validator.Asset:
-		return g.handleAsset(asset)
 	case map[string]interface{}:
 		if _, found, err := unstructured.NestedString(asset, "name"); !found || err != nil {
 			return false, nil, err
@@ -370,6 +368,8 @@ func (g *ARMTarget) handleAsset(asset *validator.Asset) (bool, interface{}, erro
 // HandleViolation implements client.TargetHandler
 func (g *ARMTarget) HandleViolation(result *types.Result) error {
 	fmt.Println("==========ARM HandleViolation==========")
+	fmt.Println(result)
+	fmt.Println(result.Review)
 	result.Resource = result.Review
 	return nil
 }
@@ -528,7 +528,7 @@ func main() {
 		"parameters": map[string]interface{}{
 			"kind": "VirtualMachine",
 			"type": "Microsoft.Compute/virtualMachines",
-			"msg":  "it matched",
+			"msg":  "No VMs allowed",
 		},
 	}
 	
@@ -544,12 +544,26 @@ func main() {
 	resp, err = cfClient.AddConstraint(ctx, &unstructured.Unstructured{Object: constraint})
 	fmt.Println(resp)
 
-	asset := Asset{}
-	request := ReviewRequest{
-		Assets: asset,
-	}
+	data := `
+{
+	"name": "test-name",
+	"asset_type": "test-asset-type",
+	"ancestry_path": "organizations/123454321/folders/1221214/projects/557385378",
+	"resource": {}
+}`
+	var item interface{}
+	json.Unmarshal([]byte(data), &item)
+	fmt.Println(item)
 
-	result, err := cfClient.Review(ctx, request, cfclient.Tracing(true))
+	result, err := cfClient.Review(ctx, item, cfclient.Tracing(true))
 
 	fmt.Println(result)
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Trace)
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Target)
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results)
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0])
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Msg)
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Metadata)
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Constraint)
+	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].EnforcementAction)
 }

@@ -225,6 +225,8 @@ func (tc *ReviewTestcase) run(t *testing.T) {
 	}
 
 	resp, err = cfClient.AddConstraint(ctx, &unstructured.Unstructured{Object: constraint})
+	fmt.Println("========== ADD CONSTRAINT RESPONSE ==========")
+	fmt.Println(resp)
 
 	if tc.WantConstraintError {
 		if err == nil {
@@ -241,9 +243,15 @@ func (tc *ReviewTestcase) run(t *testing.T) {
 
 	// create review from tc, input needs to be GCP hierarchy path
 	reviewObj := tc.Object(t)
+	fmt.Println("========== TC ==========")
+	fmt.Println(tc)
 	fmt.Println("========== REVIEW OBJ ==========")
 	fmt.Println(reviewObj)
+	fmt.Printf("Type of %v is %T", reviewObj, reviewObj)
+	fmt.Println()
 	resp, err = cfClient.Review(ctx, reviewObj, client.Tracing(true))
+	fmt.Println("========== REVIEW RESPONSE ==========")
+	fmt.Println(resp)
 	if err != nil {
 		t.Fatal(err)
 	}
