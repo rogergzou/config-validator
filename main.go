@@ -15,12 +15,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"text/template"
@@ -35,23 +33,10 @@ import (
 
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 
-	"github.com/GoogleCloudPlatform/config-validator/pkg/api/validator"
 	"github.com/GoogleCloudPlatform/config-validator/pkg/gcv/configs"
-	asset2 "github.com/GoogleCloudPlatform/config-validator/pkg/asset"
-	"github.com/gogo/protobuf/jsonpb"
 )
 
 const defaultTargetName = "arm.policy.azure.com"
-
-const defaultConstraintTemplateRego = `
-package testconstraint
-
-violation[{"msg": msg}] {
-	input.parameters.kind == "VirtualMachine" 
-    input.parameters.type == "Microsoft.Compute/virtualMachines"
-	msg := input.parameters.msg
-}
-`
 
 const testVersion = "v1beta1"
 const testConstraintKind = "TestConstraint"
@@ -126,21 +111,7 @@ it calls out the line number.
 const libraryTemplateSrc = `package target
 
 matching_constraints[constraint] {
-	asset := input.review
 	constraint := {{.ConstraintsRoot}}[_][_]
-	spec := object.get(constraint, "spec", {})
-	match := object.get(spec, "match", {})
-
-	# Try ancestries / excludedAncestries first, then
-	# fall back to target / exclude.
-	# Default matcher behavior is to match everything.
-	ancestries := object.get(match, "ancestries", object.get(match, "target", ["**"]))
-	ancestries_match := {asset.ancestry_path | path_matches(asset.ancestry_path, ancestries[_])}
-	count(ancestries_match) != 0
-
-	excluded_ancestries := object.get(match, "excludedAncestries", object.get(match, "exclude", []))
-	excluded_ancestries_match := {asset.ancestry_path | path_matches(asset.ancestry_path, excluded_ancestries[_])}
-	count(excluded_ancestries_match) == 0
 }
 
 # CAI Resource Types
@@ -165,36 +136,6 @@ path_matches(path, pattern) {
 	glob.match(pattern, ["/"], path)
 }
 
-########
-# Util #
-########
-# get_default returns the value of an object's field or the provided default value.
-# It avoids creating an undefined state when trying to access an object attribute that does
-# not exist
-get_default(object, field, _default) = output {
-  has_field(object, field)
-  output = object[field]
-}
-
-get_default(object, field, _default) = output {
-  has_field(object, field) == false
-  output = _default
-}
-
-# has_field returns whether an object has a field
-has_field(object, field) = true {
-  object[field]
-}
-# False is a tricky special case, as false responses would create an undefined document unless
-# they are explicitly tested for
-has_field(object, field) = true {
-  object[field] == false
-}
-has_field(object, field) = false {
-  not object[field]
-  not object[field] == false
-}
-
 `
 
 var libraryTemplate = template.Must(template.New("Library").Parse(libraryTemplateSrc))
@@ -217,41 +158,10 @@ func New() *ARMTarget {
 
 // MatchSchema implements client.MatchSchemaProvider
 func (g *ARMTarget) MatchSchema() apiextensions.JSONSchemaProps {
+	fmt.Println("==========ARM MatchSchema==========")
 	schema := apiextensions.JSONSchemaProps{
 		Type: "object",
 		Properties: map[string]apiextensions.JSONSchemaProps{
-			"target": {
-				Type: "array",
-				Items: &apiextensions.JSONSchemaPropsOrArray{
-					Schema: &apiextensions.JSONSchemaProps{
-						Type: "string",
-					},
-				},
-			},
-			"exclude": {
-				Type: "array",
-				Items: &apiextensions.JSONSchemaPropsOrArray{
-					Schema: &apiextensions.JSONSchemaProps{
-						Type: "string",
-					},
-				},
-			},
-			"ancestries": {
-				Type: "array",
-				Items: &apiextensions.JSONSchemaPropsOrArray{
-					Schema: &apiextensions.JSONSchemaProps{
-						Type: "string",
-					},
-				},
-			},
-			"excludedAncestries": {
-				Type: "array",
-				Items: &apiextensions.JSONSchemaPropsOrArray{
-					Schema: &apiextensions.JSONSchemaProps{
-						Type: "string",
-					},
-				},
-			},
 		},
 	}
 
@@ -280,89 +190,9 @@ func (g *ARMTarget) HandleReview(obj interface{}) (bool, interface{}, error) {
 	fmt.Println("==========ARM HandleReview==========")
 	switch asset := obj.(type) {
 	case map[string]interface{}:
-		if _, found, err := unstructured.NestedString(asset, "name"); !found || err != nil {
-			return false, nil, err
-		}
-		if _, found, err := unstructured.NestedString(asset, "asset_type"); !found || err != nil {
-			return false, nil, err
-		}
-		if _, found, err := unstructured.NestedString(asset, "ancestry_path"); !found || err != nil {
-			return false, nil, err
-		}
-		_, foundResource, err := unstructured.NestedMap(asset, "resource")
-		if err != nil {
-			return false, nil, err
-		}
-		_, foundIam, err := unstructured.NestedMap(asset, "iam_policy")
-		if err != nil {
-			return false, nil, err
-		}
-		foundOrgPolicy := false
-		if asset["org_policy"] != nil {
-			foundOrgPolicy = true
-		}
-		_, foundAccessPolicy, err := unstructured.NestedMap(asset, "access_policy")
-		if err != nil {
-			return false, nil, err
-		}
-		_, foundAcessLevel, err := unstructured.NestedMap(asset, "access_level")
-		if err != nil {
-			return false, nil, err
-		}
-		_, foundServicePerimeter, err := unstructured.NestedMap(asset, "service_perimeter")
-		if err != nil {
-			return false, nil, err
-		}
-
-		if !foundIam && !foundResource && !foundOrgPolicy && !foundAccessPolicy && !foundAcessLevel && !foundServicePerimeter {
-			return false, nil, nil
-		}
-		resourceTypes := 0
-		if foundResource {
-			resourceTypes++
-		}
-		if foundIam {
-			resourceTypes++
-		}
-		if foundOrgPolicy {
-			resourceTypes++
-		}
-		if foundAccessPolicy {
-			resourceTypes++
-		}
-		if foundAcessLevel {
-			resourceTypes++
-		}
-		if foundServicePerimeter {
-			resourceTypes++
-		}
-		if resourceTypes > 1 {
-			return false, nil, fmt.Errorf("malformed asset has more than one of: resource, iam policy, org policy, access context policy: %v", asset)
-		}
 		return true, asset, nil
 	}
 	return false, nil, nil
-}
-
-// handleAsset handles input from CAI assets as received via the gRPC interface.
-func (g *ARMTarget) handleAsset(asset *validator.Asset) (bool, interface{}, error) {
-	if asset.Resource == nil {
-		return false, nil, fmt.Errorf("CAI asset's resource field is nil %s", asset)
-	}
-	asset2.CleanStructValue(asset.Resource.Data)
-	m := &jsonpb.Marshaler{
-		OrigName: true,
-	}
-	var buf bytes.Buffer
-	if err := m.Marshal(&buf, asset); err != nil {
-		return false, nil, fmt.Errorf("marshalling to json with asset %s: %v. %w", asset.Name, asset, err)
-	}
-	var f interface{}
-	err := json.Unmarshal(buf.Bytes(), &f)
-	if err != nil {
-		return false, nil, fmt.Errorf("marshalling from json with asset %s: %v. %w", asset.Name, asset, err)
-	}
-	return true, f, nil
 }
 
 // HandleViolation implements client.TargetHandler
@@ -452,55 +282,19 @@ func checkPathGlobs(rs []string) error {
 // ValidateConstraint implements client.TargetHandler
 func (g *ARMTarget) ValidateConstraint(constraint *unstructured.Unstructured) error {
 	fmt.Println("==========ARM ValidateConstraint==========")
-	ancestries, ancestriesFound, ancestriesErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "ancestries")
-	targets, targetsFound, targetsErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "target")
-	if ancestriesFound && targetsFound {
-		return errors.New("only one of spec.match.ancestries and spec.match.target can be specified")
-	} else if ancestriesFound {
-		if ancestriesErr != nil {
-			return fmt.Errorf("invalid spec.match.ancestries: %s", ancestriesErr)
-		}
-		if ancestriesErr := checkPathGlobs(ancestries); ancestriesErr != nil {
-			return fmt.Errorf("invalid glob in spec.match.ancestries: %w", ancestriesErr)
-		}
-	} else if targetsFound {
-		// TODO b/232980918: replace with zapLogger.Warn
-		log.Print(
-			"spec.match.target is deprecated and will be removed in a future release. Use spec.match.ancestries instead",
-		)
-		if targetsErr != nil {
-			return fmt.Errorf("invalid spec.match.target: %s", targetsErr)
-		}
-		if targetsErr := checkPathGlobs(targets); targetsErr != nil {
-			return fmt.Errorf("invalid glob in spec.match.target: %w", targetsErr)
-		}
-	}
-
-	excludedAncestries, excludedAncestriesFound, excludedAncestriesErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "excludedAncestries")
-	excludes, excludesFound, excludesErr := unstructured.NestedStringSlice(constraint.Object, "spec", "match", "exclude")
-	if excludedAncestriesFound && excludesFound {
-		return errors.New("only one of spec.match.excludedAncestries and spec.match.exclude can be specified")
-	} else if excludedAncestriesFound {
-		if excludedAncestriesErr != nil {
-			return fmt.Errorf("invalid spec.match.excludedAncestries: %s", excludedAncestriesErr)
-		}
-		if excludedAncestriesErr := checkPathGlobs(excludedAncestries); excludedAncestriesErr != nil {
-			return fmt.Errorf("invalid glob in spec.match.excludedAncestries: %w", excludedAncestriesErr)
-		}
-	} else if excludesFound {
-		// TODO b/232980918: replace with zapLogger.Warn
-		log.Print(
-			"spec.match.exclude is deprecated and will be removed in a future release. Use spec.match.excludedAncestries instead",
-		)
-		if excludesErr != nil {
-			return fmt.Errorf("invalid spec.match.exclude: %s", excludesErr)
-		}
-		if excludesErr := checkPathGlobs(excludes); excludesErr != nil {
-			return fmt.Errorf("invalid glob in spec.match.exclude: %w", excludesErr)
-		}
-	}
+	fmt.Println(constraint)
 	return nil
 }
+
+const defaultConstraintTemplateRego = `
+package testconstraint
+
+violation[{"msg": msg, "details": input}] {
+	input.parameters.kind == input.review.kind
+	input.parameters.type == input.review.type
+	msg := input.parameters.msg
+}
+`
 
 // Empty main.go to allow for installing root package.
 func main() {
@@ -508,12 +302,12 @@ func main() {
 	driver := local.New(local.Tracing(true))
 	backend, err := cfclient.NewBackend(cfclient.Driver(driver))
 	if err != nil {
-		// fmt.Println("Error: Could not initialize backend: %s", err)
+		fmt.Println("Error: Could not initialize backend: ", err)
 		return
 	}
 	cfClient, err := backend.NewClient(cfclient.Targets(New()))
 	if err != nil {
-		// fmt.Println("Error: unable to set up OPA client: %s", err)
+		fmt.Println("Error: unable to set up OPA client: ", err)
 		return
 	}
 
@@ -546,9 +340,8 @@ func main() {
 
 	data := `
 {
-	"name": "test-name",
-	"asset_type": "test-asset-type",
-	"ancestry_path": "organizations/123454321/folders/1221214/projects/557385378",
+	"kind": "VirtualMachine",
+	"type": "Microsoft.Compute/virtualMachines",
 	"resource": {}
 }`
 	var item interface{}
@@ -561,9 +354,12 @@ func main() {
 	fmt.Println(result.ByTarget["arm.policy.azure.com"].Trace)
 	fmt.Println(result.ByTarget["arm.policy.azure.com"].Target)
 	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results)
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0])
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Msg)
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Metadata)
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Constraint)
-	fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].EnforcementAction)
+	if len(result.ByTarget["arm.policy.azure.com"].Results) != 0 {
+		fmt.Println("========== RESULTS ==========")
+		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0])
+		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Msg)
+		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Metadata)
+		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].Constraint)
+		fmt.Println(result.ByTarget["arm.policy.azure.com"].Results[0].EnforcementAction)
+	}
 }
