@@ -24,38 +24,26 @@ import (
 	"text/template"
 
 	// Constraint Framework Client
+	cfapis "github.com/open-policy-agent/frameworks/constraint/pkg/apis"
 	cfclient "github.com/open-policy-agent/frameworks/constraint/pkg/client"
 	"github.com/open-policy-agent/frameworks/constraint/pkg/types"
 	"github.com/open-policy-agent/frameworks/constraint/pkg/client/drivers/local"
-	"github.com/open-policy-agent/frameworks/constraint/pkg/core/templates"
+	cftemplates "github.com/open-policy-agent/frameworks/constraint/pkg/core/templates"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-
-	"github.com/GoogleCloudPlatform/config-validator/pkg/gcv/configs"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/kubectl/pkg/scheme"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 )
 
 const defaultTargetName = "arm.policy.azure.com"
 
 const testVersion = "v1beta1"
-const testConstraintKind = "TestConstraint"
+const testConstraintKind = "ArmPolicyConstraint"
 
-type Asset struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-type ReviewRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Assets Asset `protobuf:"bytes,1,rep,name=assets,proto3" json:"assets,omitempty"`
-}
-
-func newConstraintTemplate(targetName, rego string) *templates.ConstraintTemplate {
+func newConstraintTemplate(targetName, rego string) *cftemplates.ConstraintTemplate {
 	// Building a correct constraint template is difficult based on the struct. It's easier
 	// to reason about yaml files and rely on existing conversion code.
 	fmt.Println("========== newConstraintTemplate ==========")
@@ -79,7 +67,7 @@ func newConstraintTemplate(targetName, rego string) *templates.ConstraintTemplat
 			},
 		},
 	}
-	ct := map[string]interface{}{
+	ctRaw := map[string]interface{}{
 		"apiVersion": fmt.Sprintf("templates.gatekeeper.sh/%s", testVersion),
 		"kind":       "ConstraintTemplate",
 		"metadata": map[string]interface{}{
@@ -88,19 +76,26 @@ func newConstraintTemplate(targetName, rego string) *templates.ConstraintTemplat
 		"spec": ctSpec,
 	}
 
-	config, err := configs.NewConfigurationFromContents([]*unstructured.Unstructured{&unstructured.Unstructured{Object: ct}}, []string{})
+	fmt.Println("========== CT ==========")
+	fmt.Println(ctRaw)
+
+	groupVersioner := runtime.GroupVersioner(schema.GroupVersions(scheme.Scheme.PrioritizedVersionsAllGroups()))
+	obj, err := scheme.Scheme.ConvertToVersion(&unstructured.Unstructured{Object: ctRaw}, groupVersioner)
+	fmt.Println("======= VERSION OBJ")
+	fmt.Println(obj)
 	if err != nil {
-		// This represents an error in a test case
 		panic(err)
 	}
 
-	var templates []*templates.ConstraintTemplate
-	templates = append(templates, config.ARMTemplates...)
-	templates = append(templates, config.GCPTemplates...)
-	templates = append(templates, config.K8STemplates...)
-	templates = append(templates, config.TFTemplates...)
+	var ct cftemplates.ConstraintTemplate
 
-	return templates[0]
+	fmt.Println("======= CT OBJ")
+	fmt.Println(ct)
+	if err := scheme.Scheme.Convert(obj, &ct, nil); err != nil {
+		panic(err)
+	}
+
+	return &ct
 }
 
 // ARM LIBRARY TEMPLATE IMPLEMENTATION
@@ -287,11 +282,11 @@ func (g *ARMTarget) ValidateConstraint(constraint *unstructured.Unstructured) er
 }
 
 const defaultConstraintTemplateRego = `
-package testconstraint
+package constraint
 
 violation[{"msg": msg, "details": input}] {
-	input.parameters.kind == input.review.kind
-	input.parameters.type == input.review.type
+	input.review.kind == input.parameters.kind
+	input.review.type == input.parameters.type
 	msg := input.parameters.msg
 }
 `
@@ -299,6 +294,11 @@ violation[{"msg": msg, "details": input}] {
 // Empty main.go to allow for installing root package.
 func main() {
 	fmt.Println("Initializing Client")
+
+	utilruntime.Must(cfapis.AddToScheme(scheme.Scheme))
+	utilruntime.Must(apiextensions.AddToScheme(scheme.Scheme))
+	utilruntime.Must(apiextensionsv1beta1.AddToScheme(scheme.Scheme))
+
 	driver := local.New(local.Tracing(true))
 	backend, err := cfclient.NewBackend(cfclient.Driver(driver))
 	if err != nil {
